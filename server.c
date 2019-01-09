@@ -40,15 +40,18 @@ int main(int argc, char **argv)
     int client_sockets[max_peers];
 
     peer *peer1 = createPeer(0, "", 3);
+    // Creating (master) socket file descriptor
+    create_loc_sock(peer1);
     set_me_up_as_server(peer1);
+
 
     //initialise all client_socket[] to 0 so not checked
     for (i = 0; i < max_peers; i++)
-    {
         client_sockets[i] = 0;
-    }
 
-    // Creating (master) socket file descriptor
+
+
+
     if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0)
     {
         perror("socket failed");

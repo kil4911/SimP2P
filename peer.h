@@ -5,86 +5,10 @@
 
 #include <netdb.h>
 #include <errno.h>
+#include "ip.h"
 
 #define PORT 12000
 #define ID_LEN 20
-
-
-// Returns hostname for the local computer
-void checkHostName(int hostname) {
-    if (hostname == -1)
-    {
-        perror("gethostname");
-        exit(1);
-    }
-}
-
-// Returns host information corresponding to host name
-void checkHostEntry(struct hostent * hostentry) {
-    if (hostentry == NULL)
-    {
-        perror("gethostbyname");
-        exit(1);
-    }
-}
-
-// Converts space-delimited IPv4 addresses
-// to dotted-decimal format
-void checkIPbuffer(char *IPbuffer) {
-    if (NULL == IPbuffer)
-    {
-        perror("inet_ntoa");
-        exit(1);
-    }
-}
-
-unsigned long ip2int(const char *ip)
-{
-    const char *end = ip + strlen(ip);
-    unsigned long n = 0;
-    while (ip < end) {
-        n <<= 8;
-        n |= strtoul(ip, (char **)&ip, 10);
-        ip++;
-    }
-
-    return n;
-}
-
-
-
-
-char* concat(const char *s1, const char *s2) {
-    char *result = malloc(strlen(s1) + strlen(s2) + 1); // +1 for the null-terminator
-    // in real code you would check for errors in malloc here
-    strcpy(result, s1);
-    strcat(result, s2);
-    return result;
-}
-
-char * getMyAddress() {
-    char hostbuffer[256];
-    char *IPbuffer;
-    struct hostent *host_entry;
-    int hostname;
-
-    // To retrieve hostname
-    hostname = gethostname(hostbuffer, sizeof(hostbuffer));
-    checkHostName(hostname);
-
-    // To retrieve host information
-    host_entry = gethostbyname(hostbuffer);
-    checkHostEntry(host_entry);
-
-    // To convert an Internet network
-    // address into ASCII string
-    IPbuffer = inet_ntoa(*((struct in_addr*)
-            host_entry->h_addr_list[0]));
-
-    //printf("Hostname: %s\n", hostbuffer);
-    //printf("Host IP: %s", IPbuffer);
-    return IPbuffer;
-}
 
 typedef struct peer {
     int my_id;
@@ -111,13 +35,6 @@ peer *createPeer(int id, char *my_ip, int maxPeers) {
     return newPeer;
 }
 
-int ipComp(const char ip1[], const char ip2[]) {
-    unsigned long ip_addr1 = ip2int(ip1);
-    unsigned long ip_addr2 = ip2int(ip2);
-
-    return (ip_addr1 >= ip_addr2);
-}
-
 void chooseLeader(peer *myPeer) {
     char *Leader = myPeer->peers[0];
 
@@ -127,7 +44,6 @@ void chooseLeader(peer *myPeer) {
         }
     }
 }
-
 
 void addPeer(peer *myPeer, char *toAdd, int index) {
     if (myPeer->num_peers < myPeer->max_peers) {
@@ -198,6 +114,30 @@ void destroy_peer(peer *myPeer){
     free(myPeer);
 }
 
+int add_socks_2_set(peer *myPeer, fd_set readfds, const int *client_sockets) {
+    int i, client_sd;
+
+    //add master socket to set
+    FD_SET(myPeer->my_sock_fd, &readfds);
+    int max_sd = myPeer->my_sock_fd;
+
+    //add child sockets to set
+    for ( i = 0 ; i < myPeer->max_peers ; i++)
+    {
+        //socket descriptor
+        client_sd = client_sockets[i];
+
+        //if valid socket descriptor then add to read list
+        if(client_sd > 0)
+            FD_SET( client_sd , &readfds);
+
+        //highest file descriptor number, need it for the select function
+        if(client_sd > max_sd)
+            max_sd = client_sd;
+    }
+
+    return max_sd;
+}
 
 void wait_for_activity(peer *myPeer, int max_sd, fd_set readfds, int *client_sockets, int addrlen) {
     //wait for an activity on one of the sockets , timeout is NULL ,
@@ -287,31 +227,6 @@ void do_IO(peer *myPeer, fd_set readfds, int *client_sockets, int addrlen) {
     }
 }
 
-int add_socks_2_set(peer *myPeer, fd_set readfds, const int *client_sockets) {
-    int i, client_sd;
-
-    //add master socket to set
-    FD_SET(myPeer->my_sock_fd, &readfds);
-    int max_sd = myPeer->my_sock_fd;
-
-    //add child sockets to set
-    for ( i = 0 ; i < myPeer->max_peers ; i++)
-    {
-        //socket descriptor
-        client_sd = client_sockets[i];
-
-        //if valid socket descriptor then add to read list
-        if(client_sd > 0)
-            FD_SET( client_sd , &readfds);
-
-        //highest file descriptor number, need it for the select function
-        if(client_sd > max_sd)
-            max_sd = client_sd;
-    }
-
-    return max_sd;
-}
-
 void accept_connections(peer *myPeer, int *client_sockets) {
     int addrlen = sizeof(myPeer->my_sock_addr);
     fd_set readfds; //set of socket descriptors
@@ -322,7 +237,7 @@ void accept_connections(peer *myPeer, int *client_sockets) {
         FD_ZERO(&readfds);
         max_sd = add_socks_2_set(myPeer, readfds, client_sockets);
         wait_for_activity(myPeer, max_sd, readfds, client_sockets, addrlen);
-        //do_IO
+        do_IO(myPeer, readfds, client_sockets, addrlen);
         break;
     }
 }
